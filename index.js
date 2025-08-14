@@ -1,62 +1,59 @@
+import 'dotenv/config';
 import express from "express";
 import axios from "axios";
-import { load } from "cheerio";
+import OpenAI from "openai";
 
 const app = express();
+const openai = new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY,
+    baseURL: "https://api.deepseek.com/v1",
+ });
 
-async function getProductDescription(url) {
-  try {
-    const { data } = await axios.get(url, {
-      headers: { "User-Agent": "Mozilla/5.0" }
-    });
-    const $ = load(data);
-    
-    
-    let description = $("meta[name='description']").attr("content");
-    if (!description) {
-      description = $("meta[property='og:description']").attr("content");
-    }
+async function extractWithAI(html) {
+  const prompt = `
+Baca HTML eBay ini dan ekstrak semua produk yang ada. 
+Untuk setiap produk, ambil:
+1. Nama Produk
+2. Harga Produk
+3. Deskripsi Produk (jika ada)
+Kembalikan dalam format JSON array dengan key: "title", "price", "description".
+HTML:
+${html}
+  `;
 
-    return description ? description.trim() : "Deskripsi tidak ditemukan";
-  } catch (err) {
-    return "Gagal mengambil deskripsi";
-  }
+  const completion = await openai.chat.completions.create({
+    model: 'deepseek-chat', 
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0
+  });
+
+  return completion.choices[0].message.content;
 }
 
 app.get("/api/products", async (req, res) => {
   try {
-    const url = "https://www.ebay.com/sch/i.html?_from=R40&amp;_nkw=nike&amp;_sacat=0&amp;rt=nc&amp;_pgn=1";
-    const { data } = await axios.get(url, {
+    const keyword = req.query.search || "nike";
+    const page = req.query.page || 1;
+    const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keyword)}&_pgn=${page}`;
+
+    console.log(`Scraping: ${url}`);
+
+    // Ambil HTML dari eBay
+    const { data: html } = await axios.get(url, {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
 
-    const $ = load(data);
-    const products = [];
+    // Kirim HTML ke AI
+    const aiResult = await extractWithAI(html);
 
-    
-    const productLinks = [];
-    $(".s-item").each((_, el) => {
-      const title = $(el).find(".s-item__title").text().trim();
-      const price = $(el).find(".s-item__price").text().trim();
-      const link = $(el).find(".s-item__link").attr("href");
-
-      if (title && price && link) {
-        productLinks.push({ title, price, link });
-      }
-    });
-
-    
-    for (let item of productLinks) {
-      const description = await getProductDescription(item.link);
-      products.push({
-        title: item.title,
-        price: item.price,
-        description,
-        url: item.link
-      });
+    // Parsing hasil JSON dari AI
+    let products;
+    try {
+      products = JSON.parse(aiResult);
+    } catch (err) {
+      return res.status(500).json({ error: "Gagal parsing JSON dari AI", raw: aiResult });
     }
 
-    res.json(products);
+    res.json({ keyword, page, total: products.length, products });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
