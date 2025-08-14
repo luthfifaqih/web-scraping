@@ -34,18 +34,19 @@ app.get("/api/products", async (req, res) => {
     const keyword = req.query.search || "nike";
     const page = req.query.page || 1;
     const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keyword)}&_pgn=${page}`;
+    // const url = "https://www.ebay.com/sch/i.html?_from=R40&amp;_nkw=nike&amp;_sacat=0&amp;rt=nc&amp;_pgn=1";
 
     console.log(`Scraping: ${url}`);
 
-    // Ambil HTML dari eBay
+    
     const { data: html } = await axios.get(url, {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
 
-    // Kirim HTML ke AI
+    
     const aiResult = await extractWithAI(html);
 
-    // Parsing hasil JSON dari AI
+    
     let products;
     try {
       products = JSON.parse(aiResult);
